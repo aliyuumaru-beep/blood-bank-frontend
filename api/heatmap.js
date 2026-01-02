@@ -20,27 +20,24 @@ export default async function handler(req, res) {
 
   // 🔐 Authenticate helper
   const authenticate = async () => {
-    const response = await fetch(
-      `${ODOO_URL}/web/session/authenticate`,
-      {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          params: {
-            db: ODOO_DB,
-            login: ODOO_USERNAME,
-            password: ODOO_PASSWORD,
-          },
-        }),
-        credentials: "include",
-      }
-    );
+    const response = await fetch(`${ODOO_URL}/web/session/authenticate`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        params: {
+          db: ODOO_DB,
+          login: ODOO_USERNAME,
+          password: ODOO_PASSWORD,
+        },
+      }),
+      credentials: "include",
+    });
 
     return response.ok;
   };
 
-  // 🔁 Heatmap aggregation
+  // 🔁 Heatmap aggregation — FIXED TO MATCH STUDIO SCHEMA
   const callHeatmapQuery = async () => {
     return fetch(`${ODOO_URL}/web/dataset/call_kw`, {
       method: "POST",
@@ -48,12 +45,15 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         jsonrpc: "2.0",
         params: {
-          model: "x_blood_unit", // 🔴 adjust if model name differs
+          model: "x_blood_units",
           method: "read_group",
           args: [
             [["state", "=", "available"]],
-            ["quantity", "blood_bank_id"],
-            ["blood_bank_id"],
+            [
+              "x_studio_volume_ml",
+              "x_studio_many2one_field_7q0_1jdoqenki",
+            ],
+            ["x_studio_many2one_field_7q0_1jdoqenki"],
           ],
           kwargs: {},
         },
@@ -86,9 +86,13 @@ export default async function handler(req, res) {
       });
     }
 
-    // 3️⃣ Fetch lat/lng from blood bank model
+    // 3️⃣ Extract Blood Bank IDs from aggregation
     const bankIds = data.result
-      .map(row => row.blood_bank_id?.[0])
+      .map(
+        row =>
+          row.x_studio_many2one_field_7q0_1jdoqenki &&
+          row.x_studio_many2one_field_7q0_1jdoqenki[0]
+      )
       .filter(Boolean);
 
     if (!bankIds.length) {
@@ -98,17 +102,23 @@ export default async function handler(req, res) {
       });
     }
 
+    // 4️⃣ Fetch Blood Bank coordinates
     const bankResponse = await fetch(`${ODOO_URL}/web/dataset/call_kw`, {
       method: "POST",
       headers,
       body: JSON.stringify({
         jsonrpc: "2.0",
         params: {
-          model: "x_blood_bank", // 🔴 adjust if model name differs
+          model: "x_bloodbanks",
           method: "search_read",
           args: [[["id", "in", bankIds]]],
           kwargs: {
-            fields: ["id", "name", "latitude", "longitude"],
+            fields: [
+              "id",
+              "name",
+              "x_studio_latitude",
+              "x_studio_longitude",
+            ],
           },
         },
       }),
@@ -117,24 +127,36 @@ export default async function handler(req, res) {
 
     const bankData = await bankResponse.json();
 
+    if (bankData.error) {
+      return res.status(500).json({
+        error: "Odoo blood bank fetch error",
+        details: bankData.error,
+      });
+    }
+
     const bankMap = {};
     bankData.result.forEach(b => {
       bankMap[b.id] = b;
     });
 
-    // 4️⃣ Final heatmap payload
-    const heatmap = data.result.map(row => {
-      const bankId = row.blood_bank_id?.[0];
-      const bank = bankMap[bankId] || {};
+    // 5️⃣ Final heatmap payload
+    const heatmap = data.result
+      .map(row => {
+        const bankId =
+          row.x_studio_many2one_field_7q0_1jdoqenki &&
+          row.x_studio_many2one_field_7q0_1jdoqenki[0];
 
-      return {
-        id: bankId,
-        name: bank.name || "Unknown",
-        lat: bank.latitude,
-        lng: bank.longitude,
-        intensity: row.quantity || 0,
-      };
-    }).filter(p => p.lat && p.lng);
+        const bank = bankMap[bankId] || {};
+
+        return {
+          id: bankId,
+          name: bank.name || "Unknown",
+          lat: bank.x_studio_latitude,
+          lng: bank.x_studio_longitude,
+          intensity: row.x_studio_volume_ml || 0,
+        };
+      })
+      .filter(p => p.lat && p.lng);
 
     return res.status(200).json({
       success: true,
@@ -148,3 +170,4 @@ export default async function handler(req, res) {
     });
   }
 }
+

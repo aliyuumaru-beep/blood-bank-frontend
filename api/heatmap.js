@@ -55,7 +55,7 @@ export default async function handler(req, res) {
           method: "read_group",
           args: [
             //[["x_studio_lifecycle_status", "=", "available"]],
-            []
+            [[]]
             [
               "x_studio_volume_ml",
               "x_studio_many2one_field_7q0_1jdoqenki",

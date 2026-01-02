@@ -77,6 +77,7 @@ export default async function handler(req, res) {
 
     const heatmapText = await heatmapRes.text();
     const heatmapData = JSON.parse(heatmapText);
+    console.log("READ_GROUP RESULT:", heatmapData.result);
 
     if (heatmapData.error) {
       return res.status(500).json({

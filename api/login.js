@@ -1,13 +1,16 @@
 export default async function handler(req, res) {
   try {
-    const ODOO_URL = process.env.ODOO_URL;
-    const ODOO_DB = process.env.ODOO_DB;
-    const ODOO_USERNAME = process.env.ODOO_USERNAME;
-    const ODOO_PASSWORD = process.env.ODOO_PASSWORD;
+    const { ODOO_URL, ODOO_DB, ODOO_USERNAME, ODOO_PASSWORD } = process.env;
 
     if (!ODOO_URL || !ODOO_DB || !ODOO_USERNAME || !ODOO_PASSWORD) {
       return res.status(500).json({
         error: "Missing Odoo environment variables",
+        debug: {
+          ODOO_URL: !!ODOO_URL,
+          ODOO_DB: !!ODOO_DB,
+          ODOO_USERNAME: !!ODOO_USERNAME,
+          ODOO_PASSWORD: !!ODOO_PASSWORD,
+        },
       });
     }
 
@@ -24,15 +27,11 @@ export default async function handler(req, res) {
           password: ODOO_PASSWORD,
         },
       }),
-      credentials: "include",
     });
 
     const data = await response.json();
-
     res.status(200).json(data);
   } catch (err) {
-    res.status(500).json({
-      error: err.message,
-    });
+    res.status(500).json({ error: err.message });
   }
 }

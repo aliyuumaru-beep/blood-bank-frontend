@@ -128,7 +128,7 @@ try {
           kwargs: {
             fields: [
               "id",
-              "name",
+              "x_studio_bloodbank_name",
               "x_studio_latitude",
               "x_studio_longitude",
             ],
@@ -159,7 +159,7 @@ try {
 
         return {
           id: bank.id,
-          name: bank.name,
+          name: bank.x_studio_bloodbank_name,
           lat: bank.x_studio_latitude,
           lng: bank.x_studio_longitude,
           intensity,

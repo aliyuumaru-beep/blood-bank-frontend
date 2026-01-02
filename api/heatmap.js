@@ -16,13 +16,15 @@ export default async function handler(req, res) {
     });
   }
 
-  const headers = { "Content-Type": "application/json" };
+  const baseHeaders = { "Content-Type": "application/json" };
 
   try {
-    // 1️⃣ Authenticate and capture cookie
+    /* =====================================================
+       1️⃣ Authenticate & capture session cookie (MANDATORY)
+       ===================================================== */
     const authRes = await fetch(`${ODOO_URL}/web/session/authenticate`, {
       method: "POST",
-      headers,
+      headers: baseHeaders,
       body: JSON.stringify({
         jsonrpc: "2.0",
         params: {
@@ -36,7 +38,9 @@ export default async function handler(req, res) {
     const cookie = authRes.headers.get("set-cookie");
 
     if (!authRes.ok || !cookie) {
-      return res.status(401).json({ error: "Odoo authentication failed" });
+      return res.status(401).json({
+        error: "Odoo authentication failed",
+      });
     }
 
     const authHeaders = {
@@ -44,7 +48,9 @@ export default async function handler(req, res) {
       Cookie: cookie,
     };
 
-    // 2️⃣ Aggregate AVAILABLE blood volumes by blood bank
+    /* =====================================================
+       2️⃣ Aggregate AVAILABLE blood volume by Blood Bank
+       ===================================================== */
     const heatmapRes = await fetch(`${ODOO_URL}/web/dataset/call_kw`, {
       method: "POST",
       headers: authHeaders,
@@ -54,12 +60,11 @@ export default async function handler(req, res) {
           model: "x_blood_units",
           method: "read_group",
           args: [
-           [["x_studio_lifecycle_status", "=", "available"]],
+            [["x_studio_lifecycle_status", "=", "available"]],
             [
-  "x_studio_volume_ml:sum",
-  "x_studio_many2one_field_7q0_1jdoqenki",
-],
-
+              "x_studio_volume_ml:sum",
+              "x_studio_many2one_field_7q0_1jdoqenki",
+            ],
             ["x_studio_many2one_field_7q0_1jdoqenki"],
           ],
           kwargs: {},
@@ -77,16 +82,24 @@ export default async function handler(req, res) {
       });
     }
 
-    // 3️⃣ Extract Blood Bank IDs
+    /* =====================================================
+       3️⃣ Extract Blood Bank IDs
+       ===================================================== */
     const bankIds = heatmapData.result
-      .map(r => r.x_studio_many2one_field_7q0_1jdoqenki?.[0])
+      .map(
+        row =>
+          row.x_studio_many2one_field_7q0_1jdoqenki &&
+          row.x_studio_many2one_field_7q0_1jdoqenki[0]
+      )
       .filter(Boolean);
 
     if (!bankIds.length) {
       return res.json({ success: true, data: [] });
     }
 
-    // 4️⃣ Fetch Blood Bank coordinates
+    /* =====================================================
+       4️⃣ Fetch Blood Bank coordinates
+       ===================================================== */
     const bankRes = await fetch(`${ODOO_URL}/web/dataset/call_kw`, {
       method: "POST",
       headers: authHeaders,
@@ -119,9 +132,13 @@ export default async function handler(req, res) {
     }
 
     const bankMap = {};
-    bankData.result.forEach(b => (bankMap[b.id] = b));
+    bankData.result.forEach(b => {
+      bankMap[b.id] = b;
+    });
 
-    // 5️⃣ Final heatmap payload
+    /* =====================================================
+       5️⃣ Build final heatmap payload
+       ===================================================== */
     const heatmap = heatmapData.result
       .map(row => {
         const bankId =
@@ -134,7 +151,7 @@ export default async function handler(req, res) {
           name: bank.name,
           lat: bank.x_studio_latitude,
           lng: bank.x_studio_longitude,
-          intensity: row.x_studio_volume_ml || 0,
+          intensity: row.x_studio_volume_ml_sum || 0,
         };
       })
       .filter(Boolean);

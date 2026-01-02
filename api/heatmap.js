@@ -70,7 +70,18 @@ export default async function handler(req, res) {
       }),
     });
 
-    const unitsData = await unitsRes.json();
+   const unitsText = await unitsRes.text();
+
+let unitsData;
+try {
+  unitsData = JSON.parse(unitsText);
+} catch (e) {
+  return res.status(500).json({
+    error: "Invalid JSON from Odoo (units)",
+    raw: unitsText.slice(0, 500),
+  });
+}
+
 
     if (unitsData.error) {
       return res.status(500).json({

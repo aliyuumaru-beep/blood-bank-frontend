@@ -19,7 +19,7 @@ export default async function handler(req, res) {
   const headers = { "Content-Type": "application/json" };
 
   try {
-    // 1️⃣ Authenticate and CAPTURE COOKIE
+    // 1️⃣ Authenticate and capture cookie
     const authRes = await fetch(`${ODOO_URL}/web/session/authenticate`, {
       method: "POST",
       headers,
@@ -33,21 +33,18 @@ export default async function handler(req, res) {
       }),
     });
 
-    const setCookie = authRes.headers.get("set-cookie");
+    const cookie = authRes.headers.get("set-cookie");
 
-    if (!authRes.ok || !setCookie) {
-      return res.status(401).json({
-        error: "Odoo authentication failed",
-      });
+    if (!authRes.ok || !cookie) {
+      return res.status(401).json({ error: "Odoo authentication failed" });
     }
 
-    // 2️⃣ Reusable headers WITH COOKIE
     const authHeaders = {
       "Content-Type": "application/json",
-      Cookie: setCookie,
+      Cookie: cookie,
     };
 
-    // 3️⃣ Aggregate blood volumes
+    // 2️⃣ Aggregate AVAILABLE blood volumes by blood bank
     const heatmapRes = await fetch(`${ODOO_URL}/web/dataset/call_kw`, {
       method: "POST",
       headers: authHeaders,
@@ -57,7 +54,7 @@ export default async function handler(req, res) {
           model: "x_blood_units",
           method: "read_group",
           args: [
-            [["state", "=", "available"]],
+            [["x_studio_lifecycle_status", "=", "available"]],
             [
               "x_studio_volume_ml",
               "x_studio_many2one_field_7q0_1jdoqenki",
@@ -79,6 +76,7 @@ export default async function handler(req, res) {
       });
     }
 
+    // 3️⃣ Extract Blood Bank IDs
     const bankIds = heatmapData.result
       .map(r => r.x_studio_many2one_field_7q0_1jdoqenki?.[0])
       .filter(Boolean);
@@ -87,7 +85,7 @@ export default async function handler(req, res) {
       return res.json({ success: true, data: [] });
     }
 
-    // 4️⃣ Fetch blood bank coordinates
+    // 4️⃣ Fetch Blood Bank coordinates
     const bankRes = await fetch(`${ODOO_URL}/web/dataset/call_kw`, {
       method: "POST",
       headers: authHeaders,
@@ -122,9 +120,11 @@ export default async function handler(req, res) {
     const bankMap = {};
     bankData.result.forEach(b => (bankMap[b.id] = b));
 
+    // 5️⃣ Final heatmap payload
     const heatmap = heatmapData.result
       .map(row => {
-        const bankId = row.x_studio_many2one_field_7q0_1jdoqenki?.[0];
+        const bankId =
+          row.x_studio_many2one_field_7q0_1jdoqenki?.[0];
         const bank = bankMap[bankId];
         if (!bank) return null;
 
@@ -138,7 +138,10 @@ export default async function handler(req, res) {
       })
       .filter(Boolean);
 
-    return res.json({ success: true, data: heatmap });
+    return res.json({
+      success: true,
+      data: heatmap,
+    });
 
   } catch (err) {
     return res.status(500).json({

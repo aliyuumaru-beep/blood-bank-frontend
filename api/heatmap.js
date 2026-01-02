@@ -20,7 +20,7 @@ export default async function handler(req, res) {
 
   try {
     /* =====================================================
-       1️⃣ Authenticate & capture session cookie (MANDATORY)
+       1️⃣ Authenticate & get session cookie
        ===================================================== */
     const authRes = await fetch(`${ODOO_URL}/web/session/authenticate`, {
       method: "POST",
@@ -49,55 +49,54 @@ export default async function handler(req, res) {
     };
 
     /* =====================================================
-       2️⃣ Aggregate AVAILABLE blood volume by Blood Bank
+       2️⃣ Fetch ALL blood units (NO read_group)
        ===================================================== */
-    const heatmapRes = await fetch(`${ODOO_URL}/web/dataset/call_kw`, {
+    const unitsRes = await fetch(`${ODOO_URL}/web/dataset/call_kw`, {
       method: "POST",
       headers: authHeaders,
       body: JSON.stringify({
         jsonrpc: "2.0",
         params: {
           model: "x_blood_units",
-          method: "read_group",
-          args: [
-  [], // ← no domain filter at all
-  [
-    "x_studio_volume_ml:sum",
-    "x_studio_many2one_field_7q0_1jdoqenki",
-  ],
-  ["x_studio_many2one_field_7q0_1jdoqenki"],
-],
-
-            ["x_studio_many2one_field_7q0_1jdoqenki"],
-          ],
-          kwargs: {},
+          method: "search_read",
+          args: [[]], // no filter for now (safe)
+          kwargs: {
+            fields: [
+              "x_studio_volume_ml",
+              "x_studio_many2one_field_7q0_1jdoqenki",
+            ],
+          },
         },
       }),
     });
 
-    const heatmapText = await heatmapRes.text();
-    const heatmapData = JSON.parse(heatmapText);
-    console.log("READ_GROUP RESULT:", heatmapData.result);
-    console.log("READ_GROUP RAW RESULT:", JSON.stringify(heatmapData, null, 2));
+    const unitsData = await unitsRes.json();
 
-
-    if (heatmapData.error) {
+    if (unitsData.error) {
       return res.status(500).json({
-        error: "Odoo heatmap aggregation error",
-        details: heatmapData.error,
+        error: "Failed to fetch blood units",
+        details: unitsData.error,
       });
     }
 
     /* =====================================================
-       3️⃣ Extract Blood Bank IDs
+       3️⃣ Aggregate volume per Blood Bank (JS-side)
        ===================================================== */
-    const bankIds = heatmapData.result
-      .map(
-        row =>
-          row.x_studio_many2one_field_7q0_1jdoqenki &&
-          row.x_studio_many2one_field_7q0_1jdoqenki[0]
-      )
-      .filter(Boolean);
+    const volumeByBank = {};
+
+    unitsData.result.forEach(unit => {
+      const bank = unit.x_studio_many2one_field_7q0_1jdoqenki;
+      const volume = unit.x_studio_volume_ml || 0;
+
+      if (!bank || !bank[0]) return;
+
+      const bankId = bank[0];
+
+      volumeByBank[bankId] =
+        (volumeByBank[bankId] || 0) + volume;
+    });
+
+    const bankIds = Object.keys(volumeByBank).map(Number);
 
     if (!bankIds.length) {
       return res.json({ success: true, data: [] });
@@ -106,7 +105,7 @@ export default async function handler(req, res) {
     /* =====================================================
        4️⃣ Fetch Blood Bank coordinates
        ===================================================== */
-    const bankRes = await fetch(`${ODOO_URL}/web/dataset/call_kw`, {
+    const banksRes = await fetch(`${ODOO_URL}/web/dataset/call_kw`, {
       method: "POST",
       headers: authHeaders,
       body: JSON.stringify({
@@ -127,37 +126,32 @@ export default async function handler(req, res) {
       }),
     });
 
-    const bankText = await bankRes.text();
-    const bankData = JSON.parse(bankText);
+    const banksData = await banksRes.json();
 
-    if (bankData.error) {
+    if (banksData.error) {
       return res.status(500).json({
-        error: "Odoo blood bank fetch error",
-        details: bankData.error,
+        error: "Failed to fetch blood banks",
+        details: banksData.error,
       });
     }
 
-    const bankMap = {};
-    bankData.result.forEach(b => {
-      bankMap[b.id] = b;
-    });
-
     /* =====================================================
-       5️⃣ Build final heatmap payload
+       5️⃣ Build heatmap payload
        ===================================================== */
-    const heatmap = heatmapData.result
-      .map(row => {
-        const bankId =
-          row.x_studio_many2one_field_7q0_1jdoqenki?.[0];
-        const bank = bankMap[bankId];
-        if (!bank) return null;
+    const heatmap = banksData.result
+      .map(bank => {
+        const intensity = volumeByBank[bank.id] || 0;
+
+        if (!bank.x_studio_latitude || !bank.x_studio_longitude) {
+          return null;
+        }
 
         return {
-          id: bankId,
+          id: bank.id,
           name: bank.name,
           lat: bank.x_studio_latitude,
           lng: bank.x_studio_longitude,
-          intensity: row.x_studio_volume_ml_sum || 0,
+          intensity,
         };
       })
       .filter(Boolean);
